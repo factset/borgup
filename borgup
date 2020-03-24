@@ -1,0 +1,607 @@
+#!/bin/bash
+
+NICE_SCRIPT_NAME="Borgup"
+SCRIPT_NAME=`basename "$0"`
+BORGUP_VERSION="1.0.1"
+
+
+function print_usage {
+  echo "usage: $SCRIPT_NAME <command> [OPTIONS] CONFIG-DIR"
+  echo
+  echo "Borgup - A configuration-based wrapper for Borg Backup"
+  echo
+  echo "Borgup reads the configuration from CONFIG-DIR. For details see:"
+  echo "  $SCRIPT_NAME --help-config"
+  echo
+  echo "Common arguments"
+  echo "  -h, --help          with no command: show this help message and exit"
+  echo "                      otherwise: show help message for the command and"
+  echo "                      exit"
+  echo "      --help-config   show help on CONFIG-DIR and exit"
+  echo "  -V, --version       show show version number and exit"
+  echo "  -p, --progress      show progress information; for select commands"
+  echo "  -n, --dry-run       do not create a backup archive or prune archives;"
+  echo "                      for select commands"
+  echo
+  echo "Commands:"
+  echo "  init                initialize empty repository"
+  echo "  create              create backup"
+  echo "  prune               prune archives"
+  echo "  list                list archive or repository contents"
+}
+
+function print_usage_config {
+  cat << EOF
+Borup configuration directory
+
+The configuration directory contains two configuration files:
+- config              Borgup configuration
+- .borgup-passphrase  Passphrase for Borg repository
+
+On startup both files are sourced by Borup as Bash script files. They
+configure Borgup by setting certain variables.
+
+
+Annotated example for configruation file "config"
+=================================================
+
+## Common configuration
+## --------------------
+
+## REPOSITORY=[USER@HOST:]PATH
+##
+## Required. Path of Borg repository. For a remote repository, the path
+## is prefixed with the SSH username and host, e.g.
+##   REPOSITORY=user@host:/backup/of/user
+REPOSITORY=/mnt/backup/borg
+
+## ROOT_REQUIRED=[yes|no]
+##
+## Specifies whether Borgup must run as root (yes) or must not run as
+## root (no). Default: no.
+# ROOT_REQUIRED=no
+
+
+## Options for a remote repository
+## -------------------------------
+
+## RSH=[...]
+##
+## --rsh option to Borg specifying the SSH executable, optionally
+## with additional SSH options.
+# RSH="--rsh \"/usr/bin/ssh -i /home/username/.ssh/id_ecdsa\""
+
+## REMOTE_PATH=[...]
+##
+## --remote-path option to Borg specifying the path to the Borg
+## executable on the remote host.
+# REMOTE_PATH="--remote-path /usr/local/bin/borg"
+
+
+## Options for command 'create'
+## ----------------------------
+
+## ARCHIVE=[...]
+##
+## Required. Unique name of Borg archive to create. It is advisable
+## to include the date and time in the name. Since the configuration
+## is sourced as a Bash script, command substitution can be used.
+##
+## It is useful to include a component in the common prefix of the
+## archive names that allows to distinguish archives that are
+## subject to pruning from those that are not; see also PRUNE_PREFIX.
+## In the example above the "-A" (originally for 'automatic')
+## indicates that the archive shall be subject to pruning. Archives
+## to be excluded from pruning can be named or later renamed to
+## include e.g. "-M" (originally for 'manual').
+ARCHIVE="myarchive-A-`/bin/date +\%Y\%m\%d\-\%H\%M\%S`"
+
+## COMPRESSION=[...]
+##
+## Value for Borg's --compression parameter. Default: zlib,5.
+COMPRESSION=zlib,5
+
+## SOURCE_PATHS=[...]
+##
+## Required. Whitespace-separated list of source paths.
+SOURCE_PATHS="/home/username/important_documents
+              /home/username/kitten_videos"
+
+## EXCLUDE=[...]
+##
+## Exclude parameters for Borg.
+EXCLUDE="--one-file-system
+         --exclude-if-present .no_duplicity_backup
+         --exclude-if-present .no_borg_backup
+         --exclude-caches
+         --exclude */.cache*
+         --exclude */.dropbox*
+         --exclude */.gvfs
+         --exclude */.thumbnails*
+         --exclude */cache*
+         --exclude */Cache*
+         --exclude */Trash*
+         --exclude */trash*
+         --exclude *.backup*
+         --exclude *.o
+         --exclude *~
+         --exclude *bin_*
+         --exclude */logs/*
+         --exclude */.thunderbird/*/global-messages-db.sqlite*"
+
+
+## Options for command 'prune'
+## ---------------------------
+
+## PRUNE_PREFIX=[...]
+##
+## Only consider archive names starting with this prefix. See also
+## ARCHIVE for notes on prefixes in archive names.
+PRUNE_PREFIX="myarchive-A-"
+
+## PRUNE_OPTIONS=[...]
+##
+## Additional options for Borg's prune command.
+PRUNE_OPTIONS="--keep-within 2d
+               --keep-daily 28
+               --keep-weekly 12
+               --keep-monthly 12
+               --keep-yearly 100"
+
+
+## Options for notifications
+## -------------------------
+## Borgup can show notification popups when running the potentially
+## time-consuming commands 'create' and 'prune'.
+
+## NOTIFY_USER=[...]
+##
+## System user running the window manager.
+NOTIFY_USER=username
+
+## NOTIFY_WM=[...]
+##
+## Name of window manager. Currently only 'xfce' is supported.
+NOTIFY_WM=xfce
+
+
+Annotated example for configruation file ".borgup-passphrase"
+=============================================================
+## export BORG_PASSPHRASE=[...]
+##
+## Passphrase for Borg repository.
+##
+## For example, you can create a passwort using pwgen:
+## $ pwgen -nysB 16
+##
+## WARNING: Always keep a copy of your passphrase in a safe place!
+# export BORG_PASSPHRASE='YOUR_BORG_PASSPHRASE_GOES_HERE'
+EOF
+}
+
+function print_usage_init {
+  echo "usage: $SCRIPT_NAME init [OPTIONS] CONFIG-DIR"
+  echo
+  echo "Initialize an empty repository"
+  echo
+  echo "Required arguments:"
+  echo "  -e MODE, --encryption MODE"
+  echo "                  select encryption key mode"
+  echo
+  echo "Optional arguments:"
+  echo "      --storage-quota"
+  echo "                  storage quota of the new repository (e.g. 5G, 1.5T);"
+  echo "                  default: no quota"
+  echo "  -h, --help      show help message for the command and exit"
+  echo "  -p, --progress  show progress information"
+}
+
+function print_usage_create {
+  echo "usage: $SCRIPT_NAME create [OPTIONS] CONFIG-DIR"
+  echo
+  echo "Create new archive"
+  echo
+  echo "Optional arguments:"
+  echo "  -h, --help      show help message for the command and exit"
+  echo "  -p, --progress  show progress information"
+  echo "  -n, --dry-run   do not create a backup archive or prune archives"
+}
+
+function print_usage_prune {
+  echo "usage: $SCRIPT_NAME prune [OPTIONS] CONFIG-DIR"
+  echo
+  echo "Prune repository archives according to configured rules"
+  echo
+  echo "Optional arguments:"
+  echo "  -h, --help      show help message for the command and exit"
+  echo "  -p, --progress  show progress information"
+  echo "  -n, --dry-run   do not create a backup archive or prune archives"
+}
+
+function print_usage_list {
+  echo "usage: $SCRIPT_NAME prune [OPTIONS] CONFIG-DIR [ARCHIVE [PATH ...]]"
+  echo
+  echo "List repository or archive contents"
+  echo
+  echo "Optional arguments:"
+  echo "  -h, --help      show help message for the command and exit"
+}
+
+function print_error_end_exit {
+  echo "ERROR: $1"
+  echo "Use $SCRIPT_NAME --help for usage information."
+  exit 1
+}
+
+
+## Parse command line
+CONFIG_DIR=""
+ARCHIVE_ARG=""
+ARGS=()
+FIRST=1
+while [[ $# -gt 0 ]] ; do
+  KEY="$1"
+  case $KEY in
+
+    init|create|prune|list)
+      if [ "$CMD" != "" ] ; then
+        print_error_end_exit "Multiple commands specified: '$CMD', '$KEY'"
+      fi
+      if [ "$FIRST" != "1" ] ; then
+        print_error_end_exit "Command '$KEY' is not the first argument."
+      fi
+      CMD="$KEY"
+      shift
+      ;;
+
+    -n|--dry-run)
+      if [ "$CMD" != "create" ] && [ "$CMD" != "prune" ] ; then
+        print_error_end_exit \
+            "-n|--dry-run works only with 'create' and 'prune'."
+      fi
+      DRY_RUN=1
+      shift
+      ;;
+
+    -p|--progress)
+      PROGRESS=1
+      shift
+      ;;
+
+    -e|--encryption)
+      if [ "$CMD" != "init" ] ; then
+        print_error_end_exit \
+            "-e|--encryption is valid only for 'init'."
+      fi
+      ENCRYPTION="$2"
+      shift
+      shift
+      ;;
+
+    --storage-quota)
+      if [ "$CMD" != "init" ] ; then
+        print_error_end_exit \
+            "--storage-quota is valid only for 'init'."
+      fi
+      STORAGE_QUOTA="$2"
+      shift
+      shift
+      ;;
+
+    -V|--version)
+      echo "$SCRIPT_NAME $BORGUP_VERSION"
+      exit 0
+      ;;
+
+    -h|--help)
+      HELP=1
+      shift
+      ;;
+
+    --help-config)
+      print_usage_config
+      exit 0
+      ;;
+
+    *)
+      if [ "$CONFIG_DIR" != "" ] ; then
+        if [ "$CMD" == "list" ] ; then
+          if [ "$ARCHIVE_ARG" == "" ] ; then
+            ARCHIVE_ARG="$1"
+          else
+            ARGS+=($1)
+          fi
+        else
+          print_error_end_exit "Multiple configuration directories specified."
+        fi
+      else
+        CONFIG_DIR="$1"
+      fi
+      shift
+      ;;
+  esac
+  unset FIRST
+done
+
+if [ "$HELP" == "1" ] ; then
+  case "$CMD" in
+    init)
+      print_usage_init
+      ;;
+
+    create)
+      print_usage_create
+      ;;
+
+    prune)
+      print_usage_prune
+      ;;
+
+    list)
+      print_usage_list
+      ;;
+
+    *)
+      print_usage
+      ;;
+  esac
+  exit 0
+fi
+
+if [ "$CMD" == "" ] ; then
+  print_error_end_exit "No command specified."
+fi
+
+if [ "$CONFIG_DIR" == "" ] ; then
+  print_error_end_exit "No configuration directory specified."
+fi
+
+
+## Read configuration
+echo "($NICE_SCRIPT_NAME running with $CONFIG_DIR/config.)"
+source $CONFIG_DIR/.borgup-passphrase || exit 1
+source $CONFIG_DIR/config || exit 1
+
+
+## Notifications
+NOTIFY_HEADLINE="$NICE_SCRIPT_NAME $(basename $CONFIG_DIR)"
+
+if [ "$NOTIFY_USER" != "" ] ; then
+  if ! command -v notify-send >/dev/null ; then
+    print_error_end_exit "Command 'notify-send' not found. Please install."
+  fi
+  case $NOTIFY_WM in
+    xfce)
+      if ! command -v xfce4-session >/dev/null ; then
+        print_error_end_exit "Command 'xfce4-session' not found. Please install."
+      fi
+      ## Determine dbus address of current xfce4 session for notification.
+      SESSION_PID=`pgrep xfce4-session -u $NOTIFY_USER -n`
+      DBUS_KEY=`grep -z "^DBUS_SESSION_BUS_ADDRESS=" /proc/$SESSION_PID/environ 2>/dev/null`
+      ;;
+
+    "")
+      print_error_end_exit "No window manager for notification specified."
+      ;;
+
+    *)
+      print_error_end_exit "Window manager '$NOTIFY_WM' not yet supported."
+      ;;
+  esac
+fi
+
+function can_notify {
+  return `test "$DBUS_KEY" != ""`
+}
+
+function notify {
+  if can_notify ; then
+    sudo -u $NOTIFY_USER DISPLAY=:0.0 $DBUS_KEY notify-send --icon=$1 --urgency=$2 "$NOTIFY_HEADLINE" "$3"
+  fi
+}
+
+
+## Temporary file for error message
+TMP_ERR_FILE=/tmp/borgup-err-$$
+
+
+## Root checking
+if [ "$ROOT_REQUIRED" == "yes" ] ; then
+  if [ "$EUID" -ne "0" ] ; then
+    ## Root needed for borg to access all files.
+    notify dialog-error critical "Please run as root."
+    print_error_end_exit "Please run $SCRIPT_NAME as root."
+  fi
+else
+  if [ "$EUID" -eq "0" ] ; then
+    ## Running as root would make files in the repo, the cache, and in the local
+    ## config owned by root, thus making it unusable for the user.
+    notify dialog-error critical "Please do not run as root."
+    print_error_end_exit "Please do not run $SCRIPT_NAME as root."
+  fi
+fi
+
+
+## Init
+function cmd_init {
+  if [ "$ENCRYPTION" == "" ] ; then
+    print_error_end_exit "-e|--encryption is required for 'init'."
+  fi
+
+  echo "Start initializing $REPOSITORY"
+
+  if [ "$PROGRESS" == "1" ] ; then
+    OPT_PROGRESS="--progress"
+  fi
+
+  if [ "$STORAGE_QUOTA" != "" ] ; then
+    OPT_STORAGE_QUOTA="--storage-quota $STORAGE_QUOTA"
+  fi
+
+  eval borg $RSH $REMOTE_PATH \
+    init --verbose --show-rc $OPT_PROGRESS \
+    --encryption $ENCRYPTION \
+    $OPT_STORAGE_QUOTA \
+    "'$REPOSITORY'" \
+    >$TMP_ERR_FILE 2>&1 || {
+      cat $TMP_ERR_FILE
+      ERR_MSG=`cat $TMP_ERR_FILE`
+      if [ ${#ERR_MSG} -gt 200 ] ; then
+        ERR_MSG="${ERR_MSG:0:200}..."
+      fi
+      if can_notify ; then
+        ERR_MSG_ESC=`echo $ERR_MSG | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g'`
+        print_error_end_exit "Initializing repository failed:\n$ERR_MSG_ESC"
+      fi
+      exit 1
+    }
+  cat $TMP_ERR_FILE
+  rm $TMP_ERR_FILE 2>/dev/null
+
+  echo "Finished initializing $REPOSITORY"
+}
+
+
+## Create
+function cmd_create {
+  echo "Start creating backup $REPOSITORY::$ARCHIVE"
+  notify dialog-information low "Start creating backup."
+
+  if [ "$PROGRESS" == "1" ] ; then
+    OPT_PROGRESS="--progress"
+  fi
+
+  OPT_STATS="--stats"
+  if [ "$DRY_RUN" == "1" ] ; then
+    echo "WARNING: Performing 'borg create' as dry run."
+    OPT_DRY_RUN="--dry-run"
+    notify dialog-warning normal "Performing 'borg create' as dry run."
+    OPT_STATS=""  ## dry run not allowed with --stats for command create
+  fi
+
+  if [ "$COMPRESSION" == "" ] ; then
+    COMPRESSION="zlib,5"
+  fi
+
+  set -o noglob   ## preserve EXCLUDE pattern for Borg
+  eval borg $RSH $REMOTE_PATH \
+    create --verbose --show-rc $OPT_STATS $OPT_PROGRESS $OPT_DRY_RUN \
+    --compression $COMPRESSION \
+    "'$REPOSITORY::$ARCHIVE'" \
+    $SOURCE_PATHS \
+    ${EXCLUDE//[$'\t\r\n']} \
+    >$TMP_ERR_FILE 2>&1 || {
+      cat $TMP_ERR_FILE
+      ERR_MSG=`cat $TMP_ERR_FILE`
+      if [ ${#ERR_MSG} -gt 200 ] ; then
+        ERR_MSG="${ERR_MSG:0:200}..."
+      fi
+      if can_notify ; then
+        ERR_MSG_ESC=`echo $ERR_MSG | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g'`
+        notify dialog-error critical "Writing backup failed:\n$ERR_MSG_ESC"
+      fi
+      exit 1
+    }
+  cat $TMP_ERR_FILE
+  rm $TMP_ERR_FILE 2>/dev/null
+  set +o noglob
+  echo "Finished creating backup $REPOSITORY::$ARCHIVE"
+  notify dialog-information low "Finished creating backup."
+}
+
+
+## Prune
+function cmd_prune {
+  echo "Start pruning from $REPOSITORY"
+  notify dialog-information low "Start pruning."
+
+  if [ "$PROGRESS" == "1" ] ; then
+    OPT_PROGRESS="--progress"
+  fi
+
+  OPT_STATS="--stats"
+  if [ "$DRY_RUN" == "1" ] ; then
+    echo "WARNING: Performing 'borg prune' as dry run."
+    OPT_DRY_RUN="--dry-run"
+    notify dialog-warning normal "Performing 'borg prune' as dry run."
+    OPT_STATS=""  ## dry run not supported with --stats for command prune
+  fi
+
+  eval borg $RSH $REMOTE_PATH \
+    prune --verbose --show-rc --list $OPT_STATS $OPT_PROGRESS $OPT_DRY_RUN \
+    "'$REPOSITORY'" \
+    --prefix "$PRUNE_PREFIX" \
+    $PRUNE_OPTIONS \
+    >$TMP_ERR_FILE 2>&1 || {
+      cat $TMP_ERR_FILE
+      ERR_MSG=`cat $TMP_ERR_FILE`
+      if [ ${#ERR_MSG} -gt 200 ] ; then
+        ERR_MSG="${ERR_MSG:0:200}..."
+      fi
+      if can_notify ; then
+        ERR_MSG_ESC=`echo $ERR_MSG | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g'`
+        notify dialog-error critical "Pruning old backups failed:\n$ERR_MSG_ESC"
+      fi
+      exit 1
+    }
+  cat $TMP_ERR_FILE
+  rm $TMP_ERR_FILE 2>/dev/null
+
+  echo "Finished pruning from $REPOSITORY"
+  notify dialog-information low "Finished pruning."
+}
+
+
+## List
+function cmd_list {
+  if [ "$ARCHIVE_ARG" == "" ] ; then
+    REPOSITORY_OR_ARCHIVE="$REPOSITORY"
+  else
+    REPOSITORY_OR_ARCHIVE="$REPOSITORY::$ARCHIVE_ARG"
+  fi
+
+  eval borg $RSH $REMOTE_PATH \
+    list \
+    "'$REPOSITORY_OR_ARCHIVE'" ${ARGS[@]} \
+    >$TMP_ERR_FILE 2>&1 || {
+      cat $TMP_ERR_FILE
+      ERR_MSG=`cat $TMP_ERR_FILE`
+      if [ ${#ERR_MSG} -gt 200 ] ; then
+        ERR_MSG="${ERR_MSG:0:200}..."
+      fi
+      if can_notify ; then
+        ERR_MSG_ESC=`echo $ERR_MSG | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g'`
+        print_error_end_exit "Listing failed:\n$ERR_MSG_ESC"
+      fi
+      exit 1
+    }
+  cat $TMP_ERR_FILE
+  rm $TMP_ERR_FILE 2>/dev/null
+}
+
+
+## Switch by command
+case $CMD in
+
+  init)
+    cmd_init
+    ;;
+
+  create)
+    cmd_create
+    ;;
+
+  prune)
+    cmd_prune
+    ;;
+
+  list)
+    cmd_list
+    ;;
+
+  *)
+    print_error_end_exit "Command '$CMD' not implemented."
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,120 @@
+## Example configuration for Borgup
+
+## Common configuration
+## --------------------
+
+## REPOSITORY=[USER@HOST:]PATH
+##
+## Required. Path of Borg repository. For a remote repository, the path
+## is prefixed with the SSH username and host, e.g.
+##   REPOSITORY=user@host:/backup/of/user
+REPOSITORY=/mnt/backup/borg
+
+## ROOT_REQUIRED=[yes|no]
+##
+## Specifies whether Borgup must run as root (yes) or must not run as
+## root (no). Default: no.
+# ROOT_REQUIRED=no
+
+
+## Options for a remote repository
+## -------------------------------
+
+## RSH=[...]
+##
+## --rsh option to Borg specifying the SSH executable, optionally
+## with additional SSH options.
+# RSH="--rsh \"/usr/bin/ssh -i /home/username/.ssh/id_ecdsa\""
+
+## REMOTE_PATH=[...]
+##
+## --remote-path option to Borg specifying the path to the Borg
+## executable on the remote host.
+# REMOTE_PATH="--remote-path /usr/local/bin/borg"
+
+
+## Options for command 'create'
+## ----------------------------
+
+## ARCHIVE=[...]
+##
+## Required. Unique name of Borg archive to create. It is advisable
+## to include the date and time in the name. Since the configuration
+## is sourced as a Bash script, command substitution can be used.
+##
+## It is useful to include a component in the common prefix of the
+## archive names that allows to distinguish archives that are
+## subject to pruning from those that are not; see also PRUNE_PREFIX.
+## In the example above the "-A" (originally for 'automatic')
+## indicates that the archive shall be subject to pruning. Archives
+## to be excluded from pruning can be named or later renamed to
+## include e.g. "-M" (originally for 'manual').
+ARCHIVE="myarchive-A-`/bin/date +\%Y\%m\%d\-\%H\%M\%S`"
+
+## COMPRESSION=[...]
+##
+## Value for Borg's --compression parameter. Default: zlib,5.
+COMPRESSION=zlib,5
+
+## SOURCE_PATHS=[...]
+##
+## Required. Whitespace-separated list of source paths.
+SOURCE_PATHS="/home/username/important_documents
+              /home/username/kitten_videos"
+
+## EXCLUDE=[...]
+##
+## Exclude parameters for Borg.
+EXCLUDE="--one-file-system
+         --exclude-if-present .no_duplicity_backup
+         --exclude-if-present .no_borg_backup
+         --exclude-caches
+         --exclude */.cache*
+         --exclude */.dropbox*
+         --exclude */.gvfs
+         --exclude */.thumbnails*
+         --exclude */cache*
+         --exclude */Cache*
+         --exclude */Trash*
+         --exclude */trash*
+         --exclude *.backup*
+         --exclude *.o
+         --exclude *~
+         --exclude *bin_*
+         --exclude */logs/*
+         --exclude */.thunderbird/*/global-messages-db.sqlite*"
+
+
+## Options for command 'prune'
+## ---------------------------
+
+## PRUNE_PREFIX=[...]
+##
+## Only consider archive names starting with this prefix. See also
+## ARCHIVE for notes on prefixes in archive names.
+PRUNE_PREFIX="myarchive-A-"
+
+## PRUNE_OPTIONS=[...]
+##
+## Additional options for Borg's prune command.
+PRUNE_OPTIONS="--keep-within 2d
+               --keep-daily 28
+               --keep-weekly 12
+               --keep-monthly 12
+               --keep-yearly 100"
+
+
+## Options for notifications
+## -------------------------
+## Borgup can show notification popups when running the potentially
+## time-consuming commands 'create' and 'prune'.
+
+## NOTIFY_USER=[...]
+##
+## System user running the window manager.
+NOTIFY_USER=username
+
+## NOTIFY_WM=[...]
+##
+## Name of window manager. Currently only 'xfce' is supported.
+NOTIFY_WM=xfce

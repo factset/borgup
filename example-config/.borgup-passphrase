@@ -1,0 +1,11 @@
+## Example configuration for Borgup
+
+## export BORG_PASSPHRASE=[...]
+##
+## Passphrase for Borg repository.
+##
+## For example, you can create a passwort using pwgen:
+## $ pwgen -nysB 16
+##
+## WARNING: Always keep a copy of your passphrase in a safe place!
+# export BORG_PASSPHRASE='YOUR_BORG_PASSPHRASE_GOES_HERE'
