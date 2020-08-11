@@ -73,10 +73,10 @@ For example:
 BORGUP=/path/to/borgup
 CONFIGDIR=/path/to/doc-backup
 LOGDIR=/path/to/log-dir
-sudo -u my-name nice -n 19 ionice -c2 -n7 {
+sudo -u my-name nice -n 19 ionice -c2 -n7 bash -c "
   $BORGUP create $CONFIGDIR
-  $BORGUP prune $CONFIGDIR   
-} >>$LOGDIR/borgup-`/bin/date +\%Y-\%m`.log 2>&1
+  $BORGUP prune $CONFIGDIR
+" >>$LOGDIR/borgup-`/bin/date +\%Y-\%m`.log 2>&1
 ^D
 chmod u+x /etc/cron.daily/borgup
 ```
