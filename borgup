@@ -377,7 +377,7 @@ if [ "$NOTIFY_USER" != "" ] ; then
       fi
       ## Determine dbus address of current xfce4 session for notification.
       SESSION_PID=`pgrep xfce4-session -u $NOTIFY_USER -n`
-      DBUS_KEY=`grep -z "^DBUS_SESSION_BUS_ADDRESS=" /proc/$SESSION_PID/environ 2>/dev/null`
+      DBUS_KEY=`grep -z "^DBUS_SESSION_BUS_ADDRESS=" /proc/$SESSION_PID/environ | tr -d '\0' 2>/dev/null`
       ;;
 
     "")
